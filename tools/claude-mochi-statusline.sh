@@ -4,6 +4,13 @@
 # status line refreshes. This script forwards only the public rate-limit values
 # to the ESP32-C3 over USB serial; it never reads credentials.
 
+if ! command -v jq >/dev/null 2>&1; then
+  # This stays visible in Claude Code and makes a missing prerequisite obvious
+  # without interrupting the session or producing shell error noise.
+  printf '[Claude] install jq to send Mochi usage'
+  exit 0
+fi
+
 input=$(cat)
 
 model=$(printf '%s' "$input" | jq -r '.model.display_name // "Claude"')

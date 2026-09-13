@@ -1,19 +1,37 @@
 # Clawd Mochi Usage Display
 
-Firmware and USB bridges for macOS and Windows for a Clawd Mochi built with an ESP32-C3 Super Mini
-and a 1.54-inch 240×240 ST7789 IPS display.
+Turn a Clawd Mochi into a USB-C companion for Claude Code. It works without
+Wi-Fi: when it is not connected to a computer it shows its eyes; when Claude
+Code is active, it adds a rotating usage screen.
 
-The Mochi is a desk companion first: with no computer data it alternates between
-normal eyes and animated eyes. When Claude Code usage is available over USB-C,
-it rotates through a usage card for 10 seconds, normal eyes for 5 seconds, and
-animated eyes for 5 seconds.
+**Public repository:** <https://github.com/victorgalvez56/clawd-mochi-usage>
 
-## Hardware
+## What it shows
 
-| Display | ESP32-C3 Super Mini |
+| Claude Code has usage data | Mochi cycle |
+| --- | --- |
+| No | Normal eyes 5 s → animated eyes 5 s |
+| Yes | Usage 10 s → normal eyes 5 s → animated eyes 5 s |
+
+The usage screen shows the all-model weekly percentage and the five-hour
+percentage, plus their reset times. It only receives those four public values
+from Claude Code's status-line data. It never reads prompts, project files,
+passwords, cookies, API keys, or OAuth credentials.
+
+> Claude Code provides these limits only for eligible Claude.ai plans or a
+> supported gateway, after its first response. A separate Fable allowance is
+> not exposed by this interface, so this project deliberately does not invent
+> one. With no available usage values, Mochi remains an eyes-only companion.
+
+## 1. Wire and flash the Mochi
+
+This firmware is for an **ESP32-C3 Super Mini** and a **ZJY 1.54-inch 240×240
+ST7789 IPS** display.
+
+| Display pin | ESP32-C3 Super Mini pin |
 | --- | --- |
 | GND | GND |
-| VCC | 3.3V only |
+| VCC | **3.3V only** |
 | SCL | GPIO 8 |
 | SDA | GPIO 10 |
 | RES | GPIO 2 |
@@ -21,107 +39,117 @@ animated eyes for 5 seconds.
 | CS | GPIO 4 |
 | BLK / BKL | GPIO 3 |
 
-`SCL` and `SDA` on this display are SPI clock and SPI MOSI, not I²C.
+`SCL` and `SDA` on this display are SPI clock and SPI MOSI, not I²C. Never put
+the display VCC on 5V.
 
-## Flash the firmware
+In Arduino IDE:
 
-1. Install Arduino IDE and the **esp32 by Espressif Systems** board package.
-2. Install these libraries from Library Manager:
-   - `Adafruit GFX Library`
-   - `Adafruit ST7735 and ST7789 Library`
-3. Open `firmware/clawd_mochi/clawd_mochi.ino`.
-4. Select **ESP32C3 Dev Module**, enable **USB CDC On Boot**, select 160 MHz,
-   and upload at 921600 baud.
+1. Install the board package **esp32 by Espressif Systems**.
+2. Install `Adafruit GFX Library` and `Adafruit ST7735 and ST7789 Library`.
+3. Open [`firmware/clawd_mochi/clawd_mochi.ino`](firmware/clawd_mochi/clawd_mochi.ino).
+4. Select **ESP32C3 Dev Module**, set **USB CDC On Boot** to enabled, CPU to
+   160 MHz, upload speed to 921600, and upload.
 
-The firmware has been tested with the display wiring listed above. VCC must not
-be connected to 5V.
+Connect the finished device to the buyer's computer using a data-capable USB-C
+cable. The cable supplies power and carries the usage message; neither Wi-Fi
+nor a network address is used.
 
-## Connect Claude Code usage over USB-C
+## 2. Confirm the display before configuring Claude
 
-Keep the Mochi connected to the computer by USB-C. Claude Code sends its status-line
-JSON to a shell command after it receives a response. The included command reads
-the weekly and five-hour percentages and sends a small serial message to Mochi.
-It does not read passwords, OAuth tokens, prompts, or project files.
+Run one test command after plugging in Mochi. It sends sample values only and
+lets you verify the bars before depending on any Claude account.
 
-### Install the status line
+### macOS
 
 ```bash
-chmod +x tools/claude-mochi-statusline.sh
+chmod +x tools/send-test-usage-macos.sh tools/install-macos.sh
+./tools/send-test-usage-macos.sh
 ```
 
-Add this field to `~/.claude/settings.json` (preserve any settings you already
-have):
-
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "/absolute/path/to/claude-mochi-statusline.sh",
-    "refreshInterval": 30
-  }
-}
-```
-
-Replace `/absolute/path/to` with the folder in which you cloned this repository.
-If you already use a Claude Code status line, merge the `send_usage_to_mochi`
-function into it instead of replacing it.
-
-Start or resume a Claude Code session and send one prompt. On eligible Claude.ai
-plans, Claude Code provides the `five_hour` and `seven_day` rate-limit values to
-the status line after the first response. The Mochi will begin the three-screen
-rotation as soon as it receives them.
-
-If several serial devices are attached, set the exact device port before starting
-Claude Code:
+If there is more than one USB serial device, specify the Mochi port:
 
 ```bash
-export CLAWD_MOCHI_PORT=/dev/cu.usbmodem101
+./tools/send-test-usage-macos.sh 22 5 /dev/cu.usbmodem101
 ```
 
 ### Windows
 
-Windows 10 and 11 normally install the ESP32-C3 USB serial driver automatically
-when online. Connect the Mochi, then find its `COM` port in **Device Manager →
-Ports (COM & LPT)**. If more than one USB serial device is attached, set that
-port before launching Claude Code:
+Open PowerShell in this repository and run:
 
 ```powershell
-$env:CLAWD_MOCHI_PORT = 'COM3'
+powershell -ExecutionPolicy Bypass -File .\tools\send-test-usage.ps1
 ```
 
-Configure Claude Code to use the PowerShell bridge in its user settings. Replace
-the path with the location where you cloned this repository:
+If needed, find Mochi's port in **Device Manager → Ports (COM & LPT)** and run:
 
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"C:\\path\\to\\claude-mochi-statusline.ps1\"",
-    "refreshInterval": 30
-  }
-}
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\send-test-usage.ps1 -Port COM3
 ```
 
-The script is at `tools/claude-mochi-statusline.ps1`. It uses Windows' built-in
-serial-port support and does not require Python, Arduino IDE, or a separate USB
-driver download on current Windows versions. As on macOS, merge its send logic
-into an existing Claude Code status line instead of replacing one you already
-use.
+The Mochi changes to the usage screen for ten seconds, then starts its normal
+rotation. If it does not, see [Troubleshooting](docs/TROUBLESHOOTING.md).
 
-## Display behaviour
+## 3. Install the Claude Code connection
 
-| Data available | Cycle |
-| --- | --- |
-| No Claude usage received | Normal eyes 5 s → animated eyes 5 s |
-| Claude usage received | Usage 10 s → normal eyes 5 s → animated eyes 5 s |
+The installers copy the bridge into the current user's Claude Code folder and
+safely add a `statusLine` entry with a 30-second refresh. If a person already
+uses a custom Claude Code status line, the installer stops rather than replacing
+it. They can choose `--force` / `-Force`, and a dated settings backup is made
+first.
 
-The display keeps working as an eyes-only companion without Wi-Fi or a computer.
-The ESP32-C3's USB interface is serial, so this usage connection does not require
-joining the Mochi Wi-Fi network on macOS or Windows.
+### macOS
 
-## USB protocol
+Requirements: Claude Code 2.1.251 or newer, Node.js, and `jq`.
 
-The firmware accepts a newline-delimited message at 115200 baud:
+```bash
+brew install jq                 # only if jq is not already installed
+chmod +x tools/install-macos.sh
+./tools/install-macos.sh
+```
+
+For multiple serial devices, save Mochi's specific port into the configuration:
+
+```bash
+./tools/install-macos.sh --port /dev/cu.usbmodem101
+```
+
+To deliberately replace an existing Claude Code status line:
+
+```bash
+./tools/install-macos.sh --force
+```
+
+### Windows 10 or 11
+
+Open PowerShell in this repository:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\install-windows.ps1
+```
+
+For a particular device port:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\install-windows.ps1 -Port COM3
+```
+
+To deliberately replace an existing Claude Code status line:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\install-windows.ps1 -Force
+```
+
+Windows uses its built-in serial-port support. Most current Windows systems add
+the ESP32-C3 USB serial device automatically when online; if no COM port appears,
+install the USB serial driver supplied for the board's USB chip.
+
+## 4. Use it
+
+Restart Claude Code after installing, open any session, and send one prompt.
+After Claude responds, wait up to 30 seconds. The status line forwards the two
+available rate-limit percentages to Mochi, which starts the three-screen cycle.
+
+The exact message sent to the ESP32 is simple and can be used by other tools:
 
 ```text
 USAGE|<weekly percent>|<five-hour percent>|<weekly reset label>|<five-hour reset label>
@@ -133,12 +161,15 @@ Example:
 USAGE|22|5|Sep 10 04:59|Sep 8 16:00
 ```
 
-The current bridge intentionally uses the two rate-limit fields that Claude Code
-provides to its supported status-line interface: weekly all-model usage and the
-five-hour window. A separate Fable allowance is not part of that supported
-payload, so it is not guessed or synthesized here.
+## Selling checklist
+
+1. Flash the firmware and confirm normal/animated eye rotation unplugged from a computer.
+2. Connect USB-C and run the test command for the buyer's operating system.
+3. Include this repository link and tell the buyer to run the installer for their OS.
+4. State clearly that the usage card needs a compatible Claude Code account and
+   that the device still works as an eye display without it.
 
 ## Credits
 
 This project builds on [yousifamanuel/clawd-mochi](https://github.com/yousifamanuel/clawd-mochi),
-released under the MIT License. See `LICENSE`.
+released under the MIT License. See [LICENSE](LICENSE).
