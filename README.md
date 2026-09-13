@@ -1,6 +1,6 @@
 # Clawd Mochi Usage Display
 
-Firmware and macOS bridge for a Clawd Mochi built with an ESP32-C3 Super Mini
+Firmware and USB bridges for macOS and Windows for a Clawd Mochi built with an ESP32-C3 Super Mini
 and a 1.54-inch 240×240 ST7789 IPS display.
 
 The Mochi is a desk companion first: with no computer data it alternates between
@@ -36,9 +36,9 @@ animated eyes for 5 seconds.
 The firmware has been tested with the display wiring listed above. VCC must not
 be connected to 5V.
 
-## Connect Claude Code usage over USB-C (macOS)
+## Connect Claude Code usage over USB-C
 
-Keep the Mochi connected to the Mac by USB-C. Claude Code sends its status-line
+Keep the Mochi connected to the computer by USB-C. Claude Code sends its status-line
 JSON to a shell command after it receives a response. The included command reads
 the weekly and five-hour percentages and sends a small serial message to Mochi.
 It does not read passwords, OAuth tokens, prompts, or project files.
@@ -78,6 +78,36 @@ Claude Code:
 export CLAWD_MOCHI_PORT=/dev/cu.usbmodem101
 ```
 
+### Windows
+
+Windows 10 and 11 normally install the ESP32-C3 USB serial driver automatically
+when online. Connect the Mochi, then find its `COM` port in **Device Manager →
+Ports (COM & LPT)**. If more than one USB serial device is attached, set that
+port before launching Claude Code:
+
+```powershell
+$env:CLAWD_MOCHI_PORT = 'COM3'
+```
+
+Configure Claude Code to use the PowerShell bridge in its user settings. Replace
+the path with the location where you cloned this repository:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"C:\\path\\to\\claude-mochi-statusline.ps1\"",
+    "refreshInterval": 30
+  }
+}
+```
+
+The script is at `tools/claude-mochi-statusline.ps1`. It uses Windows' built-in
+serial-port support and does not require Python, Arduino IDE, or a separate USB
+driver download on current Windows versions. As on macOS, merge its send logic
+into an existing Claude Code status line instead of replacing one you already
+use.
+
 ## Display behaviour
 
 | Data available | Cycle |
@@ -87,7 +117,7 @@ export CLAWD_MOCHI_PORT=/dev/cu.usbmodem101
 
 The display keeps working as an eyes-only companion without Wi-Fi or a computer.
 The ESP32-C3's USB interface is serial, so this usage connection does not require
-joining the Mochi Wi-Fi network.
+joining the Mochi Wi-Fi network on macOS or Windows.
 
 ## USB protocol
 
