@@ -23,16 +23,6 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-if ! command -v jq >/dev/null 2>&1; then
-  printf '%s\n' 'This bridge needs jq. Install it with: brew install jq'
-  exit 1
-fi
-if ! command -v node >/dev/null 2>&1; then
-  printf '%s\n' 'This installer needs Node.js to safely update Claude Code settings.'
-  printf '%s\n' 'Install Node.js, then run this command again.'
-  exit 1
-fi
-
 script_dir=$(cd "$(dirname "$0")" && pwd)
 claude_dir="$HOME/.claude"
 settings_path="$claude_dir/settings.json"
@@ -45,33 +35,39 @@ export CLAWD_MOCHI_BRIDGE_PATH="$bridge_path"
 export CLAWD_MOCHI_FORCE="$force"
 export CLAWD_MOCHI_PORT_TO_SAVE="$port"
 
-node <<'NODE'
-const fs = require('fs');
+# JavaScript for Automation ships with macOS, so no Node.js or jq is needed.
+osascript -l JavaScript <<'JXA'
+ObjC.import('Foundation');
+ObjC.import('stdlib');
+const env = $.NSProcessInfo.processInfo.environment;
+const getEnv = name => ObjC.unwrap(env.objectForKey(name)) || '';
+const settingsPath = getEnv('CLAWD_MOCHI_SETTINGS_PATH');
+const bridgePath = getEnv('CLAWD_MOCHI_BRIDGE_PATH');
+const force = getEnv('CLAWD_MOCHI_FORCE') === 'true';
+const port = getEnv('CLAWD_MOCHI_PORT_TO_SAVE');
+const fm = $.NSFileManager.defaultManager;
+const readText = path => ObjC.unwrap($.NSString.stringWithContentsOfFileEncodingError(path, $.NSUTF8StringEncoding, null));
+const writeText = (path, text) => $(text).writeToFileAtomicallyEncodingError(path, true, $.NSUTF8StringEncoding, null);
+const fail = (message, code) => { console.log(message); $.exit(code); };
 
-const settingsPath = process.env.CLAWD_MOCHI_SETTINGS_PATH;
-const bridgePath = process.env.CLAWD_MOCHI_BRIDGE_PATH;
-const force = process.env.CLAWD_MOCHI_FORCE === 'true';
-const port = process.env.CLAWD_MOCHI_PORT_TO_SAVE;
 let settings = {};
-
-if (fs.existsSync(settingsPath)) {
+if (fm.fileExistsAtPath(settingsPath)) {
   try {
-    settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-  } catch {
-    console.error(`Cannot read valid JSON from ${settingsPath}. Fix it before installing.`);
-    process.exit(1);
+    settings = JSON.parse(readText(settingsPath));
+  } catch (error) {
+    fail(`Cannot read valid JSON from ${settingsPath}. Fix it before installing.`, 1);
   }
 }
 
 if (settings.statusLine && !force) {
-  console.error('Claude Code already has a statusLine. No settings were changed.');
-  console.error('Run again with --force to replace it; a dated backup will be made first.');
-  process.exit(2);
+  fail('Claude Code already has a statusLine. No settings were changed.\n' +
+    'To keep it, ask Claude Code to follow SETUP.md, which adds Mochi to the existing status line.\n' +
+    'To replace it, run again with --force; a dated backup will be made first.', 2);
 }
 
-if (fs.existsSync(settingsPath)) {
+if (fm.fileExistsAtPath(settingsPath)) {
   const backup = `${settingsPath}.before-clawd-mochi-${new Date().toISOString().replace(/[:.]/g, '-')}`;
-  fs.copyFileSync(settingsPath, backup);
+  fm.copyItemAtPathToPathError(settingsPath, backup, null);
   console.log(`Backed up existing settings to ${backup}`);
 }
 
@@ -80,11 +76,14 @@ let command = shellQuote(bridgePath);
 if (port) command = `CLAWD_MOCHI_PORT=${shellQuote(port)} ${command}`;
 
 settings.statusLine = { type: 'command', command, refreshInterval: 30 };
-fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
-NODE
+writeText(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+// osascript prints the value of the last expression; end on undefined to print nothing.
+undefined;
+JXA
+chmod 600 "$settings_path"
 
 cp "$script_dir/claude-mochi-statusline.sh" "$bridge_path"
 chmod 700 "$bridge_path"
 
 printf '%s\n' 'Clawd Mochi is connected to Claude Code for this macOS user.'
-printf '%s\n' 'Restart Claude Code, send one prompt, and wait up to 30 seconds for the usage screen.'
+printf '%s\n' 'Restart Claude Code and send one prompt; the usage screen appears right after the response.'
