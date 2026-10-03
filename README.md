@@ -1,17 +1,20 @@
 # Clawd Mochi Usage Display
 
 Turn a Clawd Mochi into a USB-C companion for Claude Code. It works without
-Wi-Fi: when it is not connected to a computer it shows its eyes; when Claude
-Code is active, it adds a rotating usage screen.
+Wi-Fi: connected to a computer it shows your Claude usage; on a charger it
+shows its eyes.
 
 **Public repository:** <https://github.com/victorgalvez56/clawd-mochi-usage>
 
 ## What it shows
 
-| Claude Code has usage data | Mochi cycle |
+| Situation | Mochi screen |
 | --- | --- |
-| No | Normal eyes 5 s → animated eyes 5 s |
-| Yes | Usage 10 s → normal eyes 5 s → animated eyes 5 s |
+| Connected to the computer and usage received | Usage, kept on screen and updated after each Claude response |
+| Connected to a charger or power bank, or no usage received yet | Normal eyes 5 s → animated eyes 5 s |
+
+Mochi stores the last usage it received, so after a restart it shows it as soon
+as it is connected to the computer again.
 
 The usage screen shows the all-model weekly percentage and the five-hour
 percentage, plus their reset times. It only receives those four public values
@@ -91,6 +94,18 @@ rotation. If it does not, see [Troubleshooting](docs/TROUBLESHOOTING.md).
 
 ## 3. Install the Claude Code connection
 
+### Easiest: let Claude Code set it up
+
+With Mochi plugged in, tell Claude Code:
+
+> Set up my Clawd Mochi following github.com/victorgalvez56/clawd-mochi-usage
+
+Claude Code follows [SETUP.md](SETUP.md): it finds the Mochi, adds the bridge to
+the status line (keeping any status line you already have), and sends a test.
+This works the same on macOS and Windows and needs no downloads.
+
+### Or run the installer
+
 The installers copy the bridge into the current user's Claude Code folder and
 safely add a `statusLine` entry with a 30-second refresh. If a person already
 uses a custom Claude Code status line, the installer stops rather than replacing
@@ -99,10 +114,10 @@ first.
 
 ### macOS
 
-Requirements: Claude Code 2.1.251 or newer, Node.js, and `jq`.
+Requirements: Claude Code 2.1.251 or newer. The bridge uses only tools that ship
+with macOS.
 
 ```bash
-brew install jq                 # only if jq is not already installed
 chmod +x tools/install-macos.sh
 ./tools/install-macos.sh
 ```
@@ -139,15 +154,15 @@ To deliberately replace an existing Claude Code status line:
 powershell -ExecutionPolicy Bypass -File .\tools\install-windows.ps1 -Force
 ```
 
-Windows uses its built-in serial-port support. Most current Windows systems add
-the ESP32-C3 USB serial device automatically when online; if no COM port appears,
-install the USB serial driver supplied for the board's USB chip.
+Windows uses its built-in serial-port support, and the bridge finds Mochi by its
+USB ID, so there is no COM port to choose. Windows 10 and 11 recognize the
+ESP32-C3 USB serial device without a driver.
 
 ## 4. Use it
 
 Restart Claude Code after installing, open any session, and send one prompt.
-After Claude responds, wait up to 30 seconds. The status line forwards the two
-available rate-limit percentages to Mochi, which starts the three-screen cycle.
+Right after Claude responds, the status line forwards the two rate-limit
+percentages to Mochi, which switches to the usage screen.
 
 The exact message sent to the ESP32 is simple and can be used by other tools:
 
@@ -165,8 +180,9 @@ USAGE|22|5|Sep 10 04:59|Sep 8 16:00
 
 1. Flash the firmware and confirm normal/animated eye rotation unplugged from a computer.
 2. Connect USB-C and run the test command for the buyer's operating system.
-3. Include this repository link and tell the buyer to run the installer for their OS.
-4. State clearly that the usage card needs a compatible Claude Code account and
+3. Include this repository link and tell the buyer to ask Claude Code to set up
+   Mochi following it (see [SETUP.md](SETUP.md)).
+4. State clearly that the usage card needs Claude Code with a claude.ai Pro or Max plan and
    that the device still works as an eye display without it.
 
 ## Credits

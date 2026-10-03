@@ -22,6 +22,7 @@
 #include <math.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <Preferences.h>
 
 // ── Pins ──────────────────────────────────────────────────────
 #define TFT_CS  4
@@ -79,7 +80,6 @@ enum AutoPhase { AUTO_USAGE, AUTO_NORMAL_EYES, AUTO_MOVING_EYES };
 AutoPhase autoPhase = AUTO_NORMAL_EYES;
 uint32_t phaseStartedAt = 0;
 uint32_t lastEyeFrameAt = 0;
-const uint32_t USAGE_DURATION_MS = 10000;
 const uint32_t EYES_DURATION_MS  = 5000;
 const uint32_t EYE_FRAME_MS      = 350;
 
@@ -378,23 +378,28 @@ void showAutoPhase(AutoPhase phase) {
   }
 }
 
-void advanceAutoPhase() {
-  if (!usageAvailable) {
-    showAutoPhase(autoPhase == AUTO_NORMAL_EYES ? AUTO_MOVING_EYES : AUTO_NORMAL_EYES);
-    return;
-  }
+// True while a computer (not just a charger) is on the USB port and has sent usage.
+bool showingUsage() {
+  return HWCDC::isPlugged() && usageAvailable;
+}
 
-  switch (autoPhase) {
-    case AUTO_USAGE:       showAutoPhase(AUTO_NORMAL_EYES); break;
-    case AUTO_NORMAL_EYES: showAutoPhase(AUTO_MOVING_EYES); break;
-    case AUTO_MOVING_EYES: showAutoPhase(AUTO_USAGE);       break;
-  }
+void advanceAutoPhase() {
+  showAutoPhase(autoPhase == AUTO_NORMAL_EYES ? AUTO_MOVING_EYES : AUTO_NORMAL_EYES);
 }
 
 void updateAutoRotation() {
   const uint32_t now = millis();
-  const uint32_t duration = autoPhase == AUTO_USAGE ? USAGE_DURATION_MS : EYES_DURATION_MS;
-  if (now - phaseStartedAt >= duration) {
+
+  // Connected with usage: keep the usage card on screen. Otherwise alternate the two eye views.
+  if (showingUsage()) {
+    if (autoPhase != AUTO_USAGE) showAutoPhase(AUTO_USAGE);
+    return;
+  }
+  if (autoPhase == AUTO_USAGE) {
+    showAutoPhase(AUTO_NORMAL_EYES);
+    return;
+  }
+  if (now - phaseStartedAt >= EYES_DURATION_MS) {
     advanceAutoPhase();
     return;
   }
@@ -1140,14 +1145,14 @@ void applyUsageLine(String line) {
   const String weeklyReset = line.substring(p3 + 1, p4);
   const String fiveHourReset = line.substring(p4 + 1);
 
-  const bool firstUsage = !usageAvailable;
   usageWeekly = weekly;
   usageFiveHour = fiveHour;
   usageWeeklyReset = weeklyReset;
   usageFiveHourReset = fiveHourReset;
   usageAvailable = true;
-  // Begin the complete rotation with the usage card the first time data arrives.
-  if (firstUsage) showAutoPhase(AUTO_USAGE);
+  saveUsage();
+  // Show the usage card right away and redraw it with each update.
+  showAutoPhase(AUTO_USAGE);
 }
 
 // Commands from the local USB-C browser bridge. These intentionally expose
@@ -1195,6 +1200,32 @@ void routeNotFound() { server.send(404, "text/plain", "not found"); }
 //  SETUP
 // ═════════════════════════════════════════════════════════════
 
+// The last usage is kept in flash so it is shown as soon as the Mac is connected,
+// even after a restart and before Claude Code sends a fresh update.
+Preferences usageStore;
+
+void saveUsage() {
+  // Only write when something changed, to spare the flash from a write every 30 seconds.
+  if (usageStore.getUChar("weekly", 255) == usageWeekly &&
+      usageStore.getUChar("fiveHour", 255) == usageFiveHour &&
+      usageStore.getString("weeklyReset") == usageWeeklyReset &&
+      usageStore.getString("fiveReset") == usageFiveHourReset) return;
+  usageStore.putUChar("weekly", usageWeekly);
+  usageStore.putUChar("fiveHour", usageFiveHour);
+  usageStore.putString("weeklyReset", usageWeeklyReset);
+  usageStore.putString("fiveReset", usageFiveHourReset);
+}
+
+void loadUsage() {
+  usageStore.begin("usage", false);
+  if (!usageStore.isKey("weekly")) return;
+  usageWeekly = usageStore.getUChar("weekly");
+  usageFiveHour = usageStore.getUChar("fiveHour");
+  usageWeeklyReset = usageStore.getString("weeklyReset");
+  usageFiveHourReset = usageStore.getString("fiveReset");
+  usageAvailable = true;
+}
+
 void setup() {
   Serial.begin(115200);
 
@@ -1235,7 +1266,8 @@ void setup() {
   server.onNotFound(routeNotFound);
   server.begin();
 
-  // With no usage data, the companion alternates between its two eye views.
+  loadUsage();
+  // Start on the eyes; the rotation switches to usage when a computer is connected.
   showAutoPhase(AUTO_NORMAL_EYES);
 }
 

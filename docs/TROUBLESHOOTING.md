@@ -12,19 +12,12 @@ This is the safe default: it means Mochi has not received valid usage data yet.
 4. Confirm the Claude account or gateway provides rate-limit values to Claude
    Code. The bridge cannot show limits that Claude Code does not provide.
 
-## macOS says `install jq to send Mochi usage`
-
-Install the one required parser, then restart Claude Code:
-
-```bash
-brew install jq
-```
-
 ## The installer says that a status line already exists
 
-The installer protects the existing Claude Code customization. Either keep that
-status line and merge this project's forwarding logic into it, or explicitly
-replace it with the installer. A backup is created before replacement.
+The installer protects the existing Claude Code customization. To keep that
+status line and add Mochi to it, ask Claude Code to follow [SETUP.md](../SETUP.md).
+To replace it instead, run the installer with the force option. A backup is
+created before replacement.
 
 ```bash
 ./tools/install-macos.sh --force
@@ -42,15 +35,17 @@ Save the port explicitly when installing. On macOS, list likely Mochi ports:
 ls /dev/cu.usbmodem*
 ```
 
-Then run the macOS installer with `--port /dev/cu.usbmodem…`. On Windows, use
-the `COM` number shown in Device Manager and run the installer with `-Port COM3`.
+Then run the macOS installer with `--port /dev/cu.usbmodem…`. On Windows the
+bridge picks the Mochi by its Espressif USB ID; if several Espressif boards are
+connected, use the `COM` number shown in Device Manager and run the installer
+with `-Port COM3`.
 
 ## The sample test cannot find a port
 
 Use a USB-C data cable, not a charge-only cable. Reconnect the device, wait a
-few seconds, and check whether a new serial port appears. On Windows, if there
-is still no COM port, install the serial driver appropriate for the USB chip on
-the specific ESP32-C3 Super Mini board.
+few seconds, and check whether a new serial port appears. On Windows it shows in
+Device Manager under Ports (COM & LPT) as a USB Serial Device. If nothing
+appears with a known data cable, try another USB port without a hub.
 
 ## Why is there no Fable meter?
 
