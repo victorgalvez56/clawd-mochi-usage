@@ -10,7 +10,7 @@ shows its eyes.
 
 | Situation | Mochi screen |
 | --- | --- |
-| Connected to the computer and usage received | Usage, kept on screen and updated after each Claude response |
+| Connected to the computer and usage received | Usage card (default) or Clawd's face, kept on screen and updated after each Claude response |
 | Connected to a charger or power bank, or no usage received yet | Normal eyes 5 s → animated eyes 5 s |
 
 Mochi stores the last usage it received, so after a restart it shows it as soon
@@ -20,6 +20,36 @@ The usage screen shows the all-model weekly percentage and the five-hour
 percentage, plus their reset times. It only receives those four public values
 from Claude Code's status-line data. It never reads prompts, project files,
 passwords, cookies, API keys, or OAuth credentials.
+
+### Choose the usage screen: card or Clawd's face
+
+While connected, Mochi shows one of two screens. The firmware setting
+`USAGE_SCREEN` picks which one:
+
+| `USAGE_SCREEN` | Screen |
+| --- | --- |
+| `USAGE_SCREEN_CARD` (default) | The usage card: weekly and five-hour bars, percentages, and reset times |
+| `USAGE_SCREEN_FACE` | Clawd's animated pixel-art face. It shows no numbers; its mood follows how much is left of the tighter limit |
+
+![Clawd's five moods: cool, calm, nervous, sleepy, and dizzy](docs/clawd-faces.gif)
+
+| Left | Clawd |
+| --- | --- |
+| 60–100 % | Cool: "deal with it" sunglasses slide down, smirk |
+| 30–59 % | Calm: square eyes look around and blink, small smile |
+| 10–29 % | Nervous: `> <` eyes, shaky mouth, sweat drop |
+| 1–9 % | Sleepy: heavy eyelids, yawning, floating Zs |
+| 0 % | Dizzy: X eyes, tongue out, stars circling |
+
+To use the face, change this line near the top of
+[`clawd_mochi.ino`](firmware/clawd_mochi/clawd_mochi.ino) before flashing:
+
+```cpp
+#define USAGE_SCREEN USAGE_SCREEN_FACE
+```
+
+Everything else stays the same: the bridge, the installers, and the message
+sent over USB.
 
 > Claude Code provides these limits only for eligible Claude.ai plans or a
 > supported gateway, after its first response. A separate Fable allowance is

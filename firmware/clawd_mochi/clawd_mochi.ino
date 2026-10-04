@@ -59,6 +59,17 @@ uint16_t C_ORANGE, C_DARKBG, C_MUTED, C_GREEN;
 #define VIEW_CODE        2
 #define VIEW_DRAW        3
 #define VIEW_USAGE       4
+#define VIEW_FACE        5
+
+// ── Screen shown while connected with usage ───────────────────
+// USAGE_SCREEN_CARD: the usage card with bars, percentages, and reset times.
+// USAGE_SCREEN_FACE: Clawd's animated pixel-art face. It shows no numbers;
+//                    its mood follows how much of the usage limit is left.
+#define USAGE_SCREEN_CARD 0
+#define USAGE_SCREEN_FACE 1
+#ifndef USAGE_SCREEN
+#define USAGE_SCREEN USAGE_SCREEN_CARD
+#endif
 
 uint8_t  currentView  = VIEW_EYES_NORMAL;
 bool     busy         = false;
@@ -75,13 +86,17 @@ String usageWeeklyReset;
 String usageFiveHourReset;
 bool usageAvailable = false;
 
+// Clawd's mood on the face screen, chosen from how much of the limit is left
+enum Mood { MOOD_COOL, MOOD_CALM, MOOD_SQUINT, MOOD_SLEEPY, MOOD_DIZZY };
+
 // ── Autonomous display rotation ──────────────────────────────
-enum AutoPhase { AUTO_USAGE, AUTO_NORMAL_EYES, AUTO_MOVING_EYES };
+enum AutoPhase { AUTO_USAGE, AUTO_FACE, AUTO_NORMAL_EYES, AUTO_MOVING_EYES };
 AutoPhase autoPhase = AUTO_NORMAL_EYES;
 uint32_t phaseStartedAt = 0;
 uint32_t lastEyeFrameAt = 0;
 const uint32_t EYES_DURATION_MS  = 5000;
 const uint32_t EYE_FRAME_MS      = 350;
+const uint32_t FACE_FRAME_MS     = 180;
 
 // ── Terminal ──────────────────────────────────────────────────
 #define TERM_COLS      15
@@ -357,6 +372,163 @@ void drawUsageView() {
   tft.setCursor(12, 214); tft.print("Claude Code -> USB -> Mochi");
 }
 
+// ── Clawd face: pixel-art mood that reacts to how much usage is left ──
+// The screen is a 16×16 grid of 15 px cells, in the style of Clawd from
+// Claude Code. Each frame is composed into a small buffer and only the cells
+// that changed are repainted, so the face animates without flicker.
+#define FACE_GRID 16
+#define FACE_CELL (DISP_W / FACE_GRID)
+#define COUNT_OF(a) (sizeof(a) / sizeof(a[0]))
+
+enum FaceInk : uint8_t { INK_BG, INK_DARK, INK_WHITE, INK_CREAM, INK_WATER, INK_PINK };
+uint16_t faceInks[6];
+uint8_t  faceCells[FACE_GRID * FACE_GRID];
+uint8_t  faceShown[FACE_GRID * FACE_GRID];
+
+void initFaceInks() {
+  faceInks[INK_DARK]  = tft.color565(40, 40, 44);
+  faceInks[INK_WHITE] = tft.color565(245, 245, 245);
+  faceInks[INK_CREAM] = tft.color565(255, 236, 210);
+  faceInks[INK_WATER] = tft.color565(120, 200, 255);
+  faceInks[INK_PINK]  = tft.color565(255, 130, 140);
+}
+
+// The tighter of the two limits (weekly or five-hour) decides the mood.
+uint8_t usageRemaining() {
+  return 100 - max(usageWeekly, usageFiveHour);
+}
+
+Mood currentMood() {
+  const uint8_t left = usageRemaining();
+  if (left >= 60) return MOOD_COOL;
+  if (left >= 30) return MOOD_CALM;
+  if (left >= 10) return MOOD_SQUINT;
+  if (left > 0)   return MOOD_SLEEPY;
+  return MOOD_DIZZY;
+}
+
+void facePx(int8_t x, int8_t y, uint8_t ink = INK_DARK) {
+  if (x < 0 || y < 0 || x >= FACE_GRID || y >= FACE_GRID) return;
+  faceCells[y * FACE_GRID + x] = ink;
+}
+
+void faceBlock(int8_t x, int8_t y, int8_t w, int8_t h, uint8_t ink = INK_DARK) {
+  for (int8_t j = 0; j < h; j++)
+    for (int8_t i = 0; i < w; i++) facePx(x + i, y + j, ink);
+}
+
+void facePixels(const int8_t pts[][2], uint8_t n, int8_t dx, int8_t dy,
+            uint8_t ink = INK_DARK) {
+  for (uint8_t i = 0; i < n; i++) facePx(pts[i][0] + dx, pts[i][1] + dy, ink);
+}
+
+void sparkle(int8_t x, int8_t y) {
+  static const int8_t plus[][2] = {{0,0},{-1,0},{1,0},{0,-1},{0,1}};
+  facePixels(plus, COUNT_OF(plus), x, y, INK_CREAM);
+}
+
+void sleepyZ(int8_t x, int8_t y) {
+  faceBlock(x, y, 3, 1, INK_CREAM);
+  facePx(x + 1, y + 1, INK_CREAM);
+  faceBlock(x, y + 2, 3, 1, INK_CREAM);
+}
+
+void sweatDrop(int8_t x, int8_t y) {
+  facePx(x, y, INK_WATER);
+  faceBlock(x - 1, y + 1, 3, 1, INK_WATER);
+  facePx(x, y + 2, INK_WATER);
+}
+
+// "Deal with it" pixel sunglasses, `o` rows above their resting place.
+void sunglasses(int8_t o) {
+  faceBlock(1, 4 + o, 14, 1);
+  faceBlock(2, 5 + o, 5, 2); faceBlock(3, 7 + o, 3, 1);
+  faceBlock(9, 5 + o, 5, 2); faceBlock(10, 7 + o, 3, 1);
+  static const int8_t glint[][2] = {{3,5},{5,5},{4,6}};
+  facePixels(glint, COUNT_OF(glint), 0, o, INK_WHITE);
+  facePixels(glint, COUNT_OF(glint), 7, o, INK_WHITE);
+}
+
+void composeFace(uint32_t f) {
+  memset(faceCells, INK_BG, sizeof(faceCells));
+
+  switch (currentMood()) {
+    case MOOD_COOL: {           // sunglasses slide down, then a glint and a smirk
+      const uint8_t t = f % 50;
+      const int8_t o = t < 8 ? (int8_t)t - 8 : 0;
+      if (t < 8) { faceBlock(4, 6, 2, 2); faceBlock(10, 6, 2, 2); }
+      sunglasses(o);
+      if (t >= 10 && t < 16) sparkle(2 + (t - 10) * 2, 2);
+      static const int8_t smirk[][2] = {{6,11},{7,11},{8,11},{9,10}};
+      facePixels(smirk, COUNT_OF(smirk), 0, 0);
+      break;
+    }
+    case MOOD_CALM: {           // square eyes looking around, small smile
+      static const int8_t look[] = {0, -1, 0, 1};
+      const int8_t lk = look[(f >> 4) % 4];
+      if (f % 30 < 2) { faceBlock(4 + lk, 7, 2, 1); faceBlock(10 + lk, 7, 2, 1); }
+      else            { faceBlock(4 + lk, 6, 2, 2); faceBlock(10 + lk, 6, 2, 2); }
+      static const int8_t smile[][2] = {{6,10},{7,11},{8,11},{9,10}};
+      facePixels(smile, COUNT_OF(smile), 0, 0);
+      break;
+    }
+    case MOOD_SQUINT: {         // > < eyes, nervous mouth, sweat drop
+      const int8_t o = (f >> 1) % 2 ? 0 : 1;
+      static const int8_t leftEye[][2]  = {{3,4},{4,5},{5,6},{4,7},{3,8}};
+      static const int8_t rightEye[][2] = {{12,4},{11,5},{10,6},{11,7},{12,8}};
+      facePixels(leftEye, COUNT_OF(leftEye), o, 0);
+      facePixels(rightEye, COUNT_OF(rightEye), -o, 0);
+      sweatDrop(14, 1 + (f >> 1) % 9);
+      const uint8_t phase = (f >> 1) % 2;
+      for (uint8_t i = 0; i < 6; i++) facePx(5 + i, 10 + (i + phase) % 2);
+      break;
+    }
+    case MOOD_SLEEPY: {         // heavy eyelids, yawning, floating Zs
+      faceBlock(4, 7, 2, 1); faceBlock(10, 7, 2, 1);
+      if ((f >> 3) % 2) { faceBlock(4, 6, 2, 1); faceBlock(10, 6, 2, 1); }
+      for (uint8_t i = 0; i < 2; i++) {
+        const uint8_t t = (f + i * 12) % 24;
+        const int8_t y = 6 - t / 3;
+        if (y >= 0) sleepyZ(12 + t / 8, y);
+      }
+      const uint8_t yawn = (f >> 2) % 6;
+      if (yawn < 3)      faceBlock(7, 10, 2, 1);
+      else if (yawn < 4) faceBlock(7, 10, 2, 2);
+      else               faceBlock(6, 10, 4, 2);
+      break;
+    }
+    case MOOD_DIZZY: {          // X eyes, tongue out, stars circling
+      const int8_t w = (f >> 2) % 2;
+      static const int8_t xEye[][2] = {{0,0},{2,0},{1,1},{0,2},{2,2}};
+      facePixels(xEye, COUNT_OF(xEye), 3 + w, 5);
+      facePixels(xEye, COUNT_OF(xEye), 10 + w, 5);
+      for (uint8_t i = 0; i < 3; i++) {
+        const float a = f * 0.25f + i * 2.09f;
+        sparkle(lroundf(7.5f + cosf(a) * 6), lroundf(2 + sinf(a)));
+      }
+      faceBlock(6, 10, 4, 1);
+      faceBlock(7 + w, 11, 2, 2, INK_PINK);
+      break;
+    }
+  }
+}
+
+// Draws frame `f`; `force` repaints every cell (after another view was shown).
+void drawFaceFrame(uint32_t f, bool force) {
+  faceInks[INK_BG] = animBgColor;
+  composeFace(f);
+  for (uint16_t i = 0; i < FACE_GRID * FACE_GRID; i++) {
+    if (!force && faceCells[i] == faceShown[i]) continue;
+    faceShown[i] = faceCells[i];
+    tft.fillRect((i % FACE_GRID) * FACE_CELL, (i / FACE_GRID) * FACE_CELL,
+                 FACE_CELL, FACE_CELL, faceInks[faceCells[i]]);
+  }
+}
+
+void drawFaceView() {
+  drawFaceFrame(0, true);
+}
+
 void showAutoPhase(AutoPhase phase) {
   autoPhase = phase;
   phaseStartedAt = millis();
@@ -366,6 +538,10 @@ void showAutoPhase(AutoPhase phase) {
     case AUTO_USAGE:
       currentView = VIEW_USAGE;
       drawUsageView();
+      break;
+    case AUTO_FACE:
+      currentView = VIEW_FACE;
+      drawFaceView();
       break;
     case AUTO_NORMAL_EYES:
       currentView = VIEW_EYES_NORMAL;
@@ -383,6 +559,11 @@ bool showingUsage() {
   return HWCDC::isPlugged() && usageAvailable;
 }
 
+// The screen used while connected, as chosen by USAGE_SCREEN.
+AutoPhase usagePhase() {
+  return USAGE_SCREEN == USAGE_SCREEN_FACE ? AUTO_FACE : AUTO_USAGE;
+}
+
 void advanceAutoPhase() {
   showAutoPhase(autoPhase == AUTO_NORMAL_EYES ? AUTO_MOVING_EYES : AUTO_NORMAL_EYES);
 }
@@ -390,12 +571,18 @@ void advanceAutoPhase() {
 void updateAutoRotation() {
   const uint32_t now = millis();
 
-  // Connected with usage: keep the usage card on screen. Otherwise alternate the two eye views.
+  // Connected with usage: keep the chosen usage screen up (the face animates).
+  // Otherwise alternate the two eye views.
   if (showingUsage()) {
-    if (autoPhase != AUTO_USAGE) showAutoPhase(AUTO_USAGE);
+    if (autoPhase != usagePhase()) {
+      showAutoPhase(usagePhase());
+    } else if (autoPhase == AUTO_FACE && now - lastEyeFrameAt >= FACE_FRAME_MS) {
+      lastEyeFrameAt = now;
+      drawFaceFrame((now - phaseStartedAt) / FACE_FRAME_MS, false);
+    }
     return;
   }
-  if (autoPhase == AUTO_USAGE) {
+  if (autoPhase == AUTO_USAGE || autoPhase == AUTO_FACE) {
     showAutoPhase(AUTO_NORMAL_EYES);
     return;
   }
@@ -1051,6 +1238,7 @@ void routeRedraw() {
     case VIEW_CODE:        drawCodeView();   break;
     case VIEW_DRAW:        tft.fillScreen(drawBgColor); break;
     case VIEW_USAGE:       drawUsageView();  break;
+    case VIEW_FACE:        drawFaceView();   break;
   }
   server.send(200, "application/json", "{\"ok\":1}");
 }
@@ -1151,8 +1339,9 @@ void applyUsageLine(String line) {
   usageFiveHourReset = fiveHourReset;
   usageAvailable = true;
   saveUsage();
-  // Show the usage card right away and redraw it with each update.
-  showAutoPhase(AUTO_USAGE);
+  // Show the usage card right away and redraw it with each update. The face
+  // picks up a new mood on its next frame, so it is only started if needed.
+  if (usagePhase() == AUTO_USAGE || autoPhase != AUTO_FACE) showAutoPhase(usagePhase());
 }
 
 // Commands from the local USB-C browser bridge. These intentionally expose
@@ -1237,6 +1426,7 @@ void setup() {
   tft.setSPISpeed(40000000);
   tft.setRotation(1);
   initColours();
+  initFaceInks();
 
   // ── Boot splash ────────────────────────────────────────────
   tft.fillScreen(animBgColor);
