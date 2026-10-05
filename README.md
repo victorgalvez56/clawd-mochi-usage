@@ -176,6 +176,29 @@ Example:
 USAGE|22|5|Sep 10 04:59|Sep 8 16:00
 ```
 
+## Limitations
+
+These were checked with Claude Code 2.1.288 on Windows 11 and a Pro plan.
+
+- **Only the Claude Code CLI updates Mochi.** The usage values reach Mochi
+  through the status line, which the Claude Code terminal runs. The Claude
+  desktop app (its Code tab) does not run status lines, so using only the app
+  never updates Mochi.
+- **Hooks are not a workaround.** The desktop app does run hooks, but their
+  input (session, working folder, tool calls, last message) carries no
+  rate-limit values.
+- **The CLI refreshes with its own responses.** A `claude` session gets new
+  values when it receives a response. If you work in the desktop app while a
+  terminal session sits idle, Mochi keeps the last values until that session
+  answers again.
+- **The limits are per account.** The percentages include everything you use
+  with the same account: CLI, desktop app, and claude.ai.
+
+### Using it alongside the desktop app
+
+Keep a `claude` session open in a terminal and send it a prompt now and then;
+each response brings Mochi up to date with the usage of the whole account.
+
 ## Selling checklist
 
 1. Flash the firmware and confirm normal/animated eye rotation unplugged from a computer.
